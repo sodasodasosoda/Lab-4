@@ -1,0 +1,132 @@
+/*--------------------------------------------------------------------
+GGR472 LAB 4: Incorporating GIS Analysis into web maps using Turf.js 
+--------------------------------------------------------------------*/
+
+// Step 1: Initialize Map
+mapboxgl.accessToken = 'pk.eyJ1Ijoic29kYWFhYWFhIiwiYSI6ImNtNW9kN2ljbzBrcG8ybG9tdG90anE3aGgifQ.rSB64rW_H8KCYtatGd1Btg';
+
+const map = new mapboxgl.Map({
+  container: 'map',
+  style: 'mapbox://styles/mapbox/light-v10',
+  center: [-79.39, 43.65],
+  zoom: 11
+});
+
+// Step 2: Fetch and display collision data
+let collisionData;
+
+fetch('https://github.com/sodasodasosoda/Lab-4/blob/main/pedcyc_collision_06-21.geojson')
+  .then(response => response.json())
+  .then(data => {
+    collisionData = data;
+    console.log("Collision data loaded:", collisionData);
+  })
+  .catch(err => console.error("Error loading collision data:", err));
+
+// Steps 3: Create bounding box AND hexgrid
+map.on('load', function() {
+  if (!collisionData) {
+    console.log("Collision data not ready yet. Try again in a moment.");
+    return;
+  }
+
+  // Optional: add the original point data for reference
+  map.addSource('collision-points', {
+    type: 'geojson',
+    data: collisionData
+  });
+  map.addLayer({
+    id: 'collision-points-layer',
+    type: 'circle',
+    source: 'collision-points',
+    paint: {
+      'circle-radius': 3,
+      'circle-color': '#FF0000'
+    }
+  });
+
+  // Generate bounding box via envelope, then expand by 10%
+  let envelopeFeature = turf.envelope(collisionData);
+  envelopeFeature = turf.transformScale(envelopeFeature, 1.1);
+  const bboxArray = envelopeFeature.bbox; // [minX, minY, maxX, maxY]
+
+  // Use turf.hexGrid to create hex polygons
+  const hexgrid = turf.hexGrid(bboxArray, 0.5, { units: 'kilometers' });
+  console.log("Hexgrid generated:", hexgrid);
+
+  // Collect point attributes into hex polygons
+  // If your data does not have '_id', replace with a valid attribute name
+  const collected = turf.collect(hexgrid, collisionData, '_id', 'values');
+
+  // Calculate collision count in each hex and track maximum
+  let maxCount = 0;
+  collected.features.forEach(feature => {
+    const count = feature.properties.values.length;
+    feature.properties.COUNT = count;
+    if (count > maxCount) maxCount = count;
+  });
+  console.log("Max collisions in any hex:", maxCount);
+
+//Step 4: AGGREGATE COLLISIONS BY HEXGRID
+  
+map.addSource('hexgridSource', {
+    type: 'geojson',
+    data: collected
+  });
+  map.addLayer({
+    id: 'hexgridLayer',
+    type: 'fill',
+    source: 'hexgridSource',
+    paint: {
+      'fill-color': [
+        'interpolate',
+        ['linear'],
+        ['get', 'COUNT'],
+        0, '#f2f0f7',
+        maxCount, '#49006a'
+      ],
+      'fill-opacity': 0.6
+    }
+  });
+  map.addLayer({
+    id: 'hexgridOutline',
+    type: 'line',
+    source: 'hexgridSource',
+    paint: {
+      'line-color': '#999',
+      'line-width': 1
+    }
+  });
+
+  // Popup on click
+  map.on('click', 'hexgridLayer', e => {
+    const props = e.features[0].properties;
+    new mapboxgl.Popup()
+      .setLngLat(e.lngLat)
+      .setHTML(`<strong>Collision Count:</strong> ${props.COUNT}`)
+      .addTo(map);
+  });
+  // Hover cursor style
+  map.on('mouseenter', 'hexgridLayer', () => {
+    map.getCanvas().style.cursor = 'pointer';
+  });
+  map.on('mouseleave', 'hexgridLayer', () => {
+    map.getCanvas().style.cursor = '';
+  });
+
+  // Step 5: Add legend
+  addMapLegend(maxCount);
+});
+
+// Legend function
+function addMapLegend(maxCount) {
+  const legend = document.getElementById('legend');
+  if (!legend) return;
+
+  legend.innerHTML = `
+    <h3>Collision Count (2006-2021)</h3>
+    <div><span style="background:#f2f0f7;"></span> 0</div>
+    <div><span style="background:#9e9ac8;"></span> ~ ${(maxCount / 2).toFixed(0)}</div>
+    <div><span style="background:#49006a;"></span> ~ ${maxCount}</div>
+  `;
+}
