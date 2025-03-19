@@ -12,11 +12,8 @@
   <script src="https://unpkg.com/@turf/turf@7.2.0/turf.min.js"></script>
 
   <style>
-    /* Basic styles */
     body { margin: 0; padding: 0; }
     .map { width: 100vw; height: 100vh; }
-
-    /* Legend container */
     #legend {
       position: absolute;
       bottom: 30px;
@@ -55,27 +52,35 @@
       zoom: 11
     });
 
-    // Step 2: Fetch and display collision data
-    let collisionData;
+    // Step 2: Inline collision data (instead of fetch)
+    // Paste the entire GeoJSON content into this variable:
+    let collisionData = {
+      "type": "FeatureCollection",
+      "features": [
+         /* 
+            ... entire geojson object from pedcyc_collision_06-21.geojson ...
+            For example:
+            {
+              "type": "Feature",
+              "properties": { "_id": 123, "xyz": ... },
+              "geometry": {
+                "type": "Point",
+                "coordinates": [ -79.4, 43.7 ]
+              }
+            },
+            ...
+         */
+      ]
+    };
 
-    // Replace this URL with a valid raw or GitHub Pages URL
-    // Example of a raw link: https://raw.githubusercontent.com/yourUser/yourRepo/branch/pedcyc_collision_06-21.geojson
-    fetch('https://raw.githubusercontent.com/yourUser/yourRepo/main/pedcyc_collision_06-21.geojson')
-      .then(response => response.json())
-      .then(data => {
-        collisionData = data;
-        console.log("Collision data loaded:", collisionData);
-      })
-      .catch(err => console.error("Error loading collision data:", err));
-
-    // Step 3: Create bounding box AND hexgrid
+    // Step 3 & 4: on map load, create bounding box, hexgrid, aggregate collisions
     map.on('load', function() {
       if (!collisionData) {
-        console.log("Collision data not ready yet. Try again in a moment.");
+        console.log("Collision data not found.");
         return;
       }
 
-      // (Optional) Add point data to the map so we can see them
+      // Optional: add point data to the map
       map.addSource('collision-points', {
         type: 'geojson',
         data: collisionData
@@ -92,25 +97,23 @@
 
       // Build bounding box
       let envelopeFeature = turf.envelope(collisionData);
-      envelopeFeature = turf.transformScale(envelopeFeature, 1.1); // scale up by 10%
+      envelopeFeature = turf.transformScale(envelopeFeature, 1.1);
       const bboxArray = envelopeFeature.bbox; // [minX, minY, maxX, maxY]
-      // Step 4: AGGREGATE COLLISIONS BY HEXGRID
+
       // Create hexgrid
       const hexgrid = turf.hexGrid(bboxArray, 0.5, { units: 'kilometers' });
-      console.log("Hexgrid generated:", hexgrid);
 
       // Collect point attributes into each hex
-      // If your data doesn't have `_id`, use a valid attribute (e.g., `ACCNUM`)
+      // If there's no '_id', replace with a field that does exist in the properties
       const collected = turf.collect(hexgrid, collisionData, '_id', 'values');
 
-      // Tally collision counts, find maxCount
+      // Count collisions in each hex, track maximum
       let maxCount = 0;
       collected.features.forEach(feature => {
         const count = feature.properties.values.length;
         feature.properties.COUNT = count;
         if (count > maxCount) maxCount = count;
       });
-      console.log("Max collisions in any hex:", maxCount);
 
       // Add hexgrid to map
       map.addSource('hexgridSource', {
@@ -150,7 +153,6 @@
           .setHTML(`<strong>Collision Count:</strong> ${props.COUNT}`)
           .addTo(map);
       });
-      // Hover cursor
       map.on('mouseenter', 'hexgridLayer', () => {
         map.getCanvas().style.cursor = 'pointer';
       });
@@ -162,11 +164,9 @@
       addMapLegend(maxCount);
     });
 
-    // Legend function
     function addMapLegend(maxCount) {
       const legend = document.getElementById('legend');
       if (!legend) return;
-
       legend.innerHTML = `
         <h3>Collision Count (2006-2021)</h3>
         <div><span style="background:#f2f0f7;"></span> 0</div>
